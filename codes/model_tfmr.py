@@ -170,7 +170,7 @@ class TfmrBlock(nn.Module):
         # TODO START
         # Implement the rest of the Tranformer block (residual connection, layer norm, feedforward)
         # NOTE: We implement the Pre-Norm version of Transformer, where the ln_1 and ln_2 are place at the residual branch
-        # HINT: You can refer to Page 38 in lecture 9 for more details
+        # HINT: You can refer to Page 39 in lecture 8 for more details
         hidden_states = 
         # TODO END
 
@@ -299,7 +299,7 @@ class TfmrLMHeadModel(nn.Module):
          }
         
 
-    def inference(self, device, PAD_ID, batch_size, maxlen, decode_strategy, temperature, top_p=1.0, top_k=50267):
+    def inference(self, device, PAD_ID, batch_size, maxlen, decode_strategy, temperature, top_p=1.0):
         self.eval()
         allgen = []
         with torch.no_grad():
