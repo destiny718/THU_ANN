@@ -346,7 +346,7 @@ class TfmrLMHeadModel(nn.Module):
                         
                         logits = logits.view(-1)
                         sorted_indices = sorted_indices + torch.arange(sorted_indices.shape[0], dtype=torch.long, device=device)[:, None] * sorted_indices.shape[1]
-                        remove_indexes = torch.masked_select(sorted_indices_to_remove, sorted_indices)
+                        remove_indexes = torch.masked_select(sorted_indices, sorted_indices_to_remove)
                         logits = logits.scatter(0, remove_indexes, float('-inf'))
                         logits = logits.reshape(sorted_indices.shape[0], -1)
                         # TODO END
