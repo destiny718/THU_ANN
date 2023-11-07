@@ -36,6 +36,7 @@ class TfmrAttention(nn.Module):
             "bias",
             # TODO START
             # define the bias term for constructing the causal mask (i.e., seeing only prefix tokens).
+            torch.tril(torch.ones(1, 1, max_positions, max_positions))    # 下三角矩阵作为mask
             # TODO END
         )
         self.register_buffer("masked_bias", torch.tensor(-1e4))
@@ -61,19 +62,19 @@ class TfmrAttention(nn.Module):
     def _attn(self, query, key, value):
         # TODO START
         # implement the multi-head mask self-attnetion mechanism
-        attn_weights = 
+        attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
             attn_weights = attn_weights / (float(value.size(-1)) ** 0.5)
 
-        causal_mask = 
+        causal_mask = self.bias.data[..., :attn_weights.shape[-2], :attn_weights.shape[-2]].to(torch.bool)
         attn_weights = torch.where(causal_mask, attn_weights, self.masked_bias.to(attn_weights.dtype))
 
-        attn_weights = 
+        attn_weights = F.softmax(attn_weights, dim=-1)
         attn_weights = self.attn_dropout(attn_weights)
-        attn_output = 
+        attn_output = torch.matmul(attn_weights, value)
 
-        return attn_output, attn_weights
+        return attn_output, attn_weights 
         # TODO END
 
     def _split_heads(self, tensor, num_heads, attn_head_size):
@@ -81,6 +82,10 @@ class TfmrAttention(nn.Module):
         # Splits hidden_size dim into attn_head_size and num_heads
         # Input Size: (batch_size, sequence_length, hidden_size)
         # Output Size: (batch_size, num_attn_heads, sequence_length, attn_head_size)
+        batch_size, sequence_length, hidden_size = tensor.size()
+        tensor = tensor.view(batch_size, sequence_length, num_heads, attn_head_size)
+        tensor = tensor.permute(0, 2, 1, 3).contiguous()
+        return tensor
         # TODO END
 
     def _merge_heads(self, tensor, num_heads, attn_head_size):
@@ -88,6 +93,10 @@ class TfmrAttention(nn.Module):
         # Merges attn_head_size dim and num_attn_heads dim into hidden_size
         # Input Size: (batch_size, num_attn_heads, sequence_length, attn_head_size)
         # Output Size: (batch_size, sequence_length, hidden_size)
+        tensor = tensor.permute(0, 2, 1, 3).contiguous()
+        batch_size, sequence_length, num_heads, attn_head_size = tensor.size()
+        tensor = tensor.view(batch_size, sequence_length, -1)
+        return tensor
         # TODO END
 
     def forward(
@@ -171,7 +180,9 @@ class TfmrBlock(nn.Module):
         # Implement the rest of the Tranformer block (residual connection, layer norm, feedforward)
         # NOTE: We implement the Pre-Norm version of Transformer, where the ln_1 and ln_2 are place at the residual branch
         # HINT: You can refer to Page 39 in lecture 8 for more details
-        hidden_states = 
+        hidden_states = residual + attn_output
+        residual = hidden_states
+        hidden_states = residual + self.mlp(self.ln_2(hidden_states))
         # TODO END
 
         if use_cache:
@@ -218,7 +229,9 @@ class TfmrModel(nn.Module):
 
         # TODO START
         # Implement the positional embeddings. Note that the length of cache hidden states used during inference
-        position_embeds = 
+        # self.wpe: 1024*768
+        position_ids = torch.arange(past_length, input_shape[-1] + past_length, device=device)
+        position_embeds = self.wpe(position_ids.view(-1, input_shape[-1]))
         # TODO END
         hidden_states = inputs_embeds + position_embeds
 
@@ -287,6 +300,12 @@ class TfmrLMHeadModel(nn.Module):
             # TODO START
             # Implement the loss function. Note that you should shift logits so that tokens < n predict n
             # HINT: We set the loss to 0 where [PAD] token is the label, except for the last token, where [PAD] token worked as the "eod of sentence" token.
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            shift_mask = (shift_labels != PAD_ID).float()
+            shift_mask = torch.cat((torch.ones(shift_labels.shape[0], 1).to(labels.device), shift_mask[:, :-1]), dim=1)
+            loss = ce_loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)) * shift_mask.view(-1)
+            loss = loss.sum() / shift_mask.sum()
             # TODO END
 
         return {
@@ -297,6 +316,7 @@ class TfmrLMHeadModel(nn.Module):
             "attentions": transformer_outputs["attentions"],
             "cross_attentions": transformer_outputs["cross_attentions"],
          }
+    
         
 
     def inference(self, device, PAD_ID, batch_size, maxlen, decode_strategy, temperature, top_p=1.0):
@@ -316,6 +336,19 @@ class TfmrLMHeadModel(nn.Module):
                     if decode_strategy == "top-p":
                         # TODO START
                         # implement top-p sampling
+                        # logits: batch_size * vocab_size
+                        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+                        sorted_indices_to_remove = cumulative_probs > top_p
+                        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                        sorted_indices_to_remove[..., 0] = 0
+                        
+                        logits = logits.view(-1)
+                        sorted_indices = sorted_indices + torch.arange(sorted_indices.shape[0], dtype=torch.long, device=device)[:, None] * sorted_indices.shape[1]
+                        remove_indexes = torch.masked_select(sorted_indices_to_remove, sorted_indices)
+                        logits = logits.scatter(0, remove_indexes, float('-inf'))
+                        logits = logits.reshape(sorted_indices.shape[0], -1)
                         # TODO END
                     prob = logits.softmax(dim=-1) # shape: (batch_size, num_vocabs)
                     now_token = torch.multinomial(prob, 1)[:, :1] # shape: (batch_size)
