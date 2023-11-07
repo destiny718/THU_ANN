@@ -1,0 +1,1 @@
+python main.py --name try --decode_strategy top-p --test try 
