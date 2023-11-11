@@ -203,6 +203,7 @@ class TfmrModel(nn.Module):
 
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([TfmrBlock(config) for _ in range(config.num_hidden_layers)])
+        self.h_l = nn.ModuleList([self.h[i] for i in [0,1,2]])
         self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
 
     def get_input_embeddings(self):
@@ -223,7 +224,7 @@ class TfmrModel(nn.Module):
 
         if past_key_values is None:
             past_length = 0
-            past_key_values = tuple([None] * len(self.h))
+            past_key_values = tuple([None] * len(self.h_l))
         else:
             past_length = past_key_values[0][0].size(-2)
 
@@ -243,7 +244,7 @@ class TfmrModel(nn.Module):
         all_self_attentions = ()
         all_cross_attentions = ()
         all_hidden_states = ()
-        for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
+        for i, (block, layer_past) in enumerate(zip(self.h_l, past_key_values)):
             all_hidden_states = all_hidden_states + (hidden_states,)
             outputs = block(
                 hidden_states,

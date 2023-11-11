@@ -11,10 +11,12 @@ from torch import optim
 from tokenizer import get_tokenizer
 import os
 from model_tfmr import TfmrLMHeadModel, TransposeLinear
+# from torch.utils.tensorboard import SummaryWriter
 
 from configuration import ModelConfig
 
 parser = argparse.ArgumentParser()
+# writer = SummaryWriter('log')
 
 parser.add_argument("--name", type=str, default="run",
     help="Experiment name. Default: run")
@@ -236,6 +238,9 @@ def main():
             train_loss = np.mean(losses)
 
             val_loss, val_ppl = fast_evaluate(model=model, data=data["dev"], batch_size=args.batch_size, PAD_ID=PAD_ID, device=device)
+            # writer.add_scalars(f'train_loss', {f'finetune_3layers_default': train_loss}, epoch)
+            # writer.add_scalars(f'val_loss', {f'finetune_3layers_default': val_loss}, epoch)
+            # writer.add_scalars(f'val_ppl', {f'finetune_3layers_default': val_ppl}, epoch)
             if val_ppl < best_val_ppl:
                 best_val_ppl = val_ppl
                 best_epoch = epoch
@@ -252,8 +257,9 @@ def main():
                 print("  best epoch:                    " + str(best_epoch))
                 print("  best validation perplexity:    " + str(best_val_ppl))
             else:
-                print("Validation perplexity: {:.3f}, becomes larger. Stop training.".format(val_ppl))
-                break
+                # print("Validation perplexity: {:.3f}, becomes larger. Stop training.".format(val_ppl))
+                # break
+                print("Validation perplexity: {:.3f}, becomes larger. Before: {:.3f}".format(val_ppl, best_val_ppl))
 
     else:
         model, config = load_model(args.train_dir, model_name=f"checkpoint_{args.test}.bin")
@@ -263,10 +269,10 @@ def main():
         print("        test_set, perplexity {:.2f}".format(test_ppl))
         result = model.inference(device=device, PAD_ID=PAD_ID, 
             batch_size=args.batch_size, maxlen=args.maxlen, decode_strategy=args.decode_strategy, temperature=args.temperature, top_p=args.top_p)
-        with open(f"output_{args.decode_strategy}.txt", "w") as fout:
+        with open(f"output_{args.test}_{args.decode_strategy}_{args.temperature}.txt", "w") as fout:
             for k, output in enumerate(result):
                 out = tokenizer.decode(output)
-                print(k, out)
+                # print(k, out)
                 fout.write(out + "\n")
         eval_result = evaluate(gen_ids=result, truth_ids=data_remove_pad["test"])
         print("        test_set, forward BLEU-4 {:.3f}, backward BLEU-4 {:.3f}, harmonic BLEU-4 {:.3f}".format(eval_result["fw-bleu-4"], eval_result["bw-bleu-4"], eval_result["fw-bw-bleu-4"]))
